@@ -17,16 +17,47 @@
 // The API will then store the data in Redis
 // The API will also listen for GET requests on the /api/factorys endpoint
 // GET requests to /api/factorys will return an array of all factories and their data
-// The REDIS_HOST environment variable is used to set the Redis host
-// The REDIS_PORT environment variable is used to set the Redis port
-// The REDIS_PASSWORD environment variable is used to set the Redis password
-// The REDIS_DB environment variable is used to set the Redis database number
+
+class Factory {
+    constructor(name){
+        this.name = name;
+        this.machines = [];
+    }
+
+
+    addMachine(machine){
+        this.machines.push(machine);
+    }
+
+    getMachine(name){
+        return this.machines.find(machine => machine.name === name);
+    }
+
+    getMachines(){
+        return this.machines;
+    }
+}
+
+class Machine {
+    constructor(name, status){
+        this.name = name;
+        this.status = status;
+    }
+
+    setStatus(status){
+        this.status = status;
+    }
+
+    getStatus(){
+        return this.status;
+    }
+
+}
 
 
 const express = require('express');
 const bodyParser = require('body-parser');
-const redis = require('redis');
-const openapi = require('express-openapi');
+
 
 const app = express();
 const port = 3000;
@@ -37,80 +68,114 @@ const jsonParser = bodyParser.json();
 // create application/x-www-form-urlencoded parser
 const urlencodedParser = bodyParser.urlencoded({ extended: false });
 
-// create redis client
-const client = redis.createClient({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: process.env.REDIS_PORT || 6379,
-    password: process.env.REDIS_PASSWORD || '',
-    db: process.env.REDIS_DB || 0,
-});
+factories = [];
 
-// connect to redis
-client.on('connect', () => {
-    console.log('Connected to Redis...');
+function saveFactory(unParsedFactory){
+    // create a new factory object
+    const newFactory = new Factory(unParsedFactory.name);
+    // iterate over the machines in the unParsedFactory
+    unParsedFactory.machines.forEach(machine => {
+        // create a new machine object
+        const newMachine = new Machine(machine.name, machine.status);
+        // add the machine to the factory
+        newFactory.addMachine(newMachine);
+    }
+    );
+    // add the factory to the factories array
+    factories.push(newFactory);   
 }
-);
 
-
-// add the express router
-const router = express.Router();
-// add the router to the app
-app.use('/api', router);
+function getAllFactories(){
+    // return all factories
+    return factories;
+}
 
 // POST /api/factory
 // add a factory to the database
-router.post('/factory', jsonParser, (req, res) => {
+app.post('/api/factory', jsonParser, (req, res) => {
     // get the factory data from the request
     const factory = req.body;
     // log the factory data
     console.log(factory);
     // add the factory to the database
-    client.hSet(factory.name, factory);
+    if (factory.name == null) {
+        // send a response
+        res.status(400).send('Factory name is required');
+        return;
+    }
+    if(getAllFactories().find(f => f.name === factory.name)){
+        // send a response
+        res.status(400).send('Factory already exists');
+        return;
+    }
+    saveFactory(factory);
     // send a response
     res.status(201).send(`Factory added with name: ${factory.name}`);
 }
 );
 
+app.patch('/api/factory/:name', jsonParser, (req, res) => {
+    // get the factory data from the request
+    const factory = req.body;
+    // log the factory data
+    console.log(factory);
+    // add the factory to the database
+    if (factory.name == null) {
+        // send a response
+        res.status(400).send('Factory name is required');
+        return;
+    }
+    const factoryToUpdate = getAllFactories().find(f => f.name === req.params.name);
+    if(factoryToUpdate == null){
+        // send a response
+        res.status(404).send('Factory not found');
+        return;
+    }
+    factoryToUpdate.name = factory.name;
+    // send a response
+    res.status(200).send(`Factory updated with name: ${factory.name}`);
+}
+);
+
+app.patch('/api/factory/:factory/:machine', jsonParser, (req, res) => {
+    // get the factory data from the request
+    const machine = req.body;
+    // log the factory data
+    console.log(req.params.factory);
+    console.log(req.params.machine);
+    // add the factory to the database
+    const factoryToUpdate = getAllFactories().find(f => f.name === req.params.factory);
+    if(factoryToUpdate == null){
+        res.status(404).send('Factory not found');
+        return;
+    }
+    const machineToUpdate = factoryToUpdate.getMachine(req.params.machine);
+    if(machineToUpdate == null){
+        res.status(404).send('Machine not found');
+        return;
+    }
+    machineToUpdate.setStatus(machine.status);
+
+    // send a response
+    res.status(200).send(`Factory ${req.params.factory} Machine ${machine.name} status patched: to ${machine.status}`);
+}
+);
+
 // GET /api/factorys
 // get all factories from the database
-router.get('/factorys', (req, res) => {
-    // get all factories from the database
-    client.hGetAll('*', (err, factorys) => {
-        if (err) {
-            console.log(err);
-            throw err;
-        }
-        // log the factories
-        console.log(factorys);
-        // send a response
-        res.status(200).send(factorys);
-    }
+app.get('/api/factorys', (req, res) => {
+    // return all factories as a json block
+    res.status(200).json(getAllFactories()
     );
 }
 );
 
-
-// generate the OpenAPI documentation
-openapi.initialize({
-    app,
-    apiDoc: './openai.yaml',
-    paths: './api',
-    docsPath: '/api-docs',
-    errorMiddleware: (err, req, res, next) => {
-      console.error(err);
-      res.status(err.status || 500).json({
-        message: err.message,
-        errors: err.errors,
-      });
-    },
-  });
-
-
-// add a redirect to the OpenAPI documentation
+// add a default route to return a html page index.html
 app.get('/', (req, res) => {
-    res.redirect('/api-docs');
+    res.sendFile(`${__dirname}/index.html`);
 }
 );
+
 
 // start the server
 app.listen(port, () => {
