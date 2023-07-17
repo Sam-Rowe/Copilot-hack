@@ -21,5 +21,5 @@ RUN npm install
 EXPOSE 3000
 
 # Run app.js when the container launches
-CMD ["node", "app.js"]
+CMD ["node", "index.js"]
 
